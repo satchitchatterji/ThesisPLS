@@ -10,3 +10,4 @@ log*
 *.lock
 wandb/*
 *wandb*
+.DS_Store

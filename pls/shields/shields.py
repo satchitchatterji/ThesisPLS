@@ -37,6 +37,7 @@ class Shield:
         differentiable=True,
         observation_net_cls=None,
         vsrl_eps=0, # TODO: CUDA compatibility
+        device=th.device("cpu"),
         **kwargs,
     ):
         if config_folder is None:
@@ -68,12 +69,11 @@ class Shield:
         # get sensor values from the pretrained observation network
         if self.observation_type == "pretrained":
             self.noisy_observations = noisy_observations
-            use_cuda = False
-            device = th.device("cuda" if use_cuda else "cpu")
+            # use_cuda = False
             self.observation_model = observation_net_cls(
                 input_size=net_input_dim*net_input_dim,
                 output_size=self.num_sensors,
-            ).to(device)
+            ).to(self.device)
             observation_net_path = path.join(config_folder, observation_net)
             self.observation_model.load_state_dict(th.load(observation_net_path))
         elif self.observation_type == "ground truth":
@@ -81,6 +81,8 @@ class Shield:
 
         # VSRL has a predefined parameter to randomize actions
         self.vsrl_eps = vsrl_eps
+
+        self.device = device
 
     def get_layer(self, program, evidences, input_struct, query_struct):
         """
@@ -137,7 +139,7 @@ class Shield:
         all_actions = th.eye(self.num_actions).unsqueeze(1)
         action_safeties = []
         for action in all_actions:
-            base_actions = th.repeat_interleave(action, sensor_values.size(0), dim=0)
+            base_actions = th.repeat_interleave(action, sensor_values.size(0), dim=0).to(self.device)
             results = self.shield_layer(
                 x={
                     "sensor_value": sensor_values,
@@ -146,7 +148,7 @@ class Shield:
             )
             action_safety = results["safe_next"]
             action_safeties.append(action_safety)
-        action_safeties = th.cat(action_safeties, dim=1)
+        action_safeties = th.cat(action_safeties, dim=1).to(self.device)
         return action_safeties
 
     def get_shielded_policy(self, base_actions, sensor_values) -> th.Tensor:
@@ -165,7 +167,6 @@ class Shield:
         actions = action_safeties * base_actions / policy_safety
 
         actions = th.clamp(actions, 0, 1)
-        # print(action_safeties, policy_safety)
         assert actions.max() <= 1.00001, f"{actions}, {actions.max()} violates MAX\n{action_safeties}\n{base_actions}\n{sensor_values}\n{policy_safety}"
         assert actions.min() >= -0.00001, f"{actions} violates MIN"
 
